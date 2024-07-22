@@ -1,0 +1,13 @@
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CONFIG_HOME="$HOME/.local/config"
+export XDG_STATE_HOME="$HOME/.local/state"
+export XDG_CACHE_HOME="$HOME/.local/cache"
+
+export ZSH="$XDG_DATA_HOME"/oh-my-zsh
+export ZDOTDIR="$XDG_CONFIG_HOME"/zsh
+export ZSH_CUSTOM="$XDG_CONFIG_HOME"/oh-my-zsh
+export HISTFILE="$XDG_STATE_HOME"/zsh/history
+[ -d "$XDG_CACHE_HOME"/zsh ] || mkdir -p "$XDG_CACHE_HOME"/zsh
+zstyle ':completion:*' cache-path "$XDG_CACHE_HOME"/zsh/zcompcache
+# compinit -d "$XDG_CACHE_HOME"/zsh/zcompdump-$ZSH_VERSION
+
