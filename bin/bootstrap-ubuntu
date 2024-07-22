@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+sudo apt update
+sudo apt upgrade
+
+mkdir ~/.local
+mkdir ~/.local/share
+mkdir ~/.local/config
+mkdir ~/.local/state
+mkdir ~/.local/cache
+
+echo 'Defaults	admin_flag="~/.local/state/.sudo_as_admin_successful"' | sudo tee -a /etc/sudoers
+rm ~/.sudo_as_admin_successful
+
+# Get rid of ~/.cache/motd.legal-displayed crap
+sudo sed -e '/.*pam_motd.so.*/d' -i /etc/pam.d/login
+sudo sed -e '/.*pam_motd.so.*/d' -i /etc/pam.d/sshd
+sudo pam-auth-update --force --package
+rm -rf ~/.cache
+
+cat ../config/zsh/global/zshenv | sudo tee -a /etc/zsh/zshenv
+source ../config/zsh/global/zshenv
+
+# Install core tools.
+sudo apt install zsh zsh-doc zsh-autosuggestions fzf ripgrep jq tldr docker.io docker-compose docker-doc \
+  build-essential libssl-dev zlib1g-dev \
+  libbz2-dev libreadline-dev libsqlite3-dev curl git \
+  libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
+
+# Switch to zsh.
+chsh -s $(which zsh)
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+echo "zstyle ':omz:update' mode auto" >> ~/.zshrc
+echo "zstyle ':omz:update' verbose minimal" >> ~/.zshrc
+
+# Install pyenv.
+export PYENV_ROOT="$XDG_DATA_HOME/pyenv"
+curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash
+
+# Git.
+git config --global user.name "Taylor Meek"
+git config --global user.email "478059+Lingnik@users.noreply.github.com"
+
+# sudo apt install software-properties-common
+# sudo add-apt-repository --yes --update ppa:ansible/ansible
+# sudo apt install ansible
+# 
+# 
+# ansible-playbook ubuntu.yml

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=""/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash video=hyperv_fb:2560x1440"/' /etc/default/grub
+
+echo 'GRUB_GFXMODE=2560x1440x32' | sudo tee -a /etc/default/grub
+echo 'GRUB_GFXPAYLOAD=2560x1440x32' | sudo tee -a /etc/default/grub
+
+sudo sed -i 's/if [ "x${GRUB_GFXMODE}" = "x" ] ; then GRUB_GFXMODE=auto; fi/if [ "x${GRUB_GFXMODE}" = "x" ] ; then GRUB_GFXMODE=2560x1440x32; fi\nif [ "x${GRUB_GFXPAYLOAD}" = "x" ] ; then GRUB_GFXPAYLOAD=2560x1440x32; fi/' /etc/grub.d/00_header
+sudo sed -i 's/  set gfxmode=${GRUB_GFXMODE}/  set gfxmode=${GRUB_GFXMODE}\n  set gfxpayload=${GRUB_GFXPAYLOAD}/' /etc/grub.d/00_header
+
+sudo update-grub
