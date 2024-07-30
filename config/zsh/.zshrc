@@ -1,3 +1,8 @@
+########################################################################################################################
+echo -n "\ue615 ${${(%):-%N}//$HOME/~} \uf251" && timing_ns=$(/opt/homebrew/bin/gdate +%s%3N)
+echo -n "\t0 $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms" && timing_ns=$(/opt/homebrew/bin/gdate +%s%3N)
+########################################################################################################################
+
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
 
@@ -72,6 +77,7 @@ ZSH_THEME="robbyrussell"
 # Add wisely, as too many plugins slow down shell startup.
 plugins=(git)
 
+echo ""
 source $ZSH/oh-my-zsh.sh
 
 # User configuration
@@ -102,3 +108,9 @@ source $ZSH/oh-my-zsh.sh
 # Example aliases
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
+
+
+########################################################################################################################
+echo "\tX $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms \uf253"
+# DO NOT ADD MORE LINES
+########################################################################################################################

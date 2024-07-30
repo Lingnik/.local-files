@@ -2,3 +2,9 @@
 /state/
 /share/
 .zcompdump*
+.zsh_history
+.zsh_sessions*
+/pipx/
+.DS_Store
+/config/falcon/
+/config/Dadroit/
