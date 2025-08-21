@@ -17,6 +17,7 @@ alias vim="nvim"
 alias vi="nvim"
 alias vimdiff="nvim -d"
 alias v="nvim"
+alias pbv='vim -p `pbpaste|sort|uniq|f2p`'
 
 # gpg
 function encrypt() {
