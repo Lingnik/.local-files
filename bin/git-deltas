@@ -1,0 +1,2 @@
+#!/usr/bin/env zsh
+git log --numstat --pretty=format:'===|%h %s' | awk 'BEGIN {plus=0; minus=0} /^===/ {if(NR!=1) {printf "(+%d/-%d)\n", plus, minus}; split($0, commit_info, "|"); printf "%s ", commit_info[2]; plus=0; minus=0} NF==3 {plus+=$1; minus+=$2} END {printf "(+%d/-%d)\n", plus, minus}'

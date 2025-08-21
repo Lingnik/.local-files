@@ -1,0 +1,10 @@
+#!/bin/zsh
+
+# Check for arguments to specify a delimiter (default: space)
+delimiter=${1:-" "}
+
+# Read input from stdin
+input=$(cat)
+
+# Convert newline-delimited input to the specified delimiter
+echo "$input" | tr '\n' "$delimiter"

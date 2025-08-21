@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# delete-versioned-bucket.sh
+# Usage: ./delete-versioned-bucket.sh <bucket-name>
+# (or set BUCKET env var)
+
+set -euo pipefail
+
+BUCKET="${1:-${BUCKET:-}}"
+if [[ -z "${BUCKET}" ]]; then
+  echo "Usage: $0 <bucket-name>"
+  exit 1
+fi
+
+echo "# Cleaning versioned bucket: s3://$BUCKET"
+
+# Loop, deleting up to 1000 items per pass until empty
+while :; do
+  BATCH="$(aws s3api list-object-versions \
+    --bucket "$BUCKET" \
+    --max-items 1000 \
+    --output json \
+    --query '{Objects: [Versions[].{Key: Key, VersionId: VersionId}, DeleteMarkers[].{Key: Key, VersionId: VersionId}][] | [], Quiet: `true`}')"
+
+  # If no objects left, break out
+  if [[ "$BATCH" == *'"Objects": []'* ]]; then
+    echo "# Bucket appears empty of versions and delete markers."
+    break
+  fi
+
+  echo "# Deleting a batch of up to 1000 versions/markers..."
+  aws s3api delete-objects --bucket "$BUCKET" --delete "$BATCH" >/dev/null
+done
+
+echo "# Removing bucket..."
+aws s3 rb "s3://$BUCKET"
+
+echo "Done."

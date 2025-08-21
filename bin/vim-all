@@ -1,0 +1,9 @@
+#!/bin/zsh
+# Check if arguments are provided
+if [[ $# -eq 0 ]]; then
+    echo "Usage: vim-all <filename> [<filename> ...]"
+    return 1
+fi
+
+# Find files and open them in Vim tabs
+find . \( -type f \) \( $(printf "-name %q -o " "$@") -false \) | xargs vim -p
