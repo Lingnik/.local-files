@@ -5,7 +5,14 @@ echo -n "\t0 $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms" && timing_n
 export Z_LOADED=$((${Z_LOADED:-0} + 1)); export Z_LOADED_${Z_LOADED}=${(%):-%N}
 ########################################################################################################################
 
-# This file should be empty
+# System-wide profile for interactive zsh(1) login shells.
+
+# Setup user specific overrides for this in ~/.zprofile. See zshbuiltins(1)
+# and zshoptions(1) for more details.
+
+if [ -x /usr/libexec/path_helper ]; then
+	eval `/usr/libexec/path_helper -s`
+fi
 
 ########################################################################################################################
 echo "\tX $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms >"

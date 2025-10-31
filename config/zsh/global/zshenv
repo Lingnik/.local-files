@@ -1,3 +1,13 @@
+########################################################################################################################
+echo "`/opt/homebrew/bin/gdate +%s%3N` whoami=`whoami` tty=`tty` pid=$$ ppid=$PPID cmd=${0##*/} file=${${(%):-%N}//$HOME/~}" >> /Users/tm/log/zsh.log
+echo -n "DEBUG> ${${(%):-%N}//$HOME/~} >" && timing_ns=$(/opt/homebrew/bin/gdate +%s%3N)
+echo -n "\t0 $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms" && timing_ns=$(/opt/homebrew/bin/gdate +%s%3N)
+export Z_LOADED=$((${Z_LOADED:-0} + 1)); export Z_LOADED_${Z_LOADED}=${(%):-%N}
+########################################################################################################################
+
+################################################################################
+# ADDED BY TM
+
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CONFIG_HOME="$HOME/.local/config"
 export XDG_STATE_HOME="$HOME/.local/state"
@@ -6,8 +16,27 @@ export XDG_CACHE_HOME="$HOME/.local/cache"
 export ZSH="$XDG_DATA_HOME"/oh-my-zsh
 export ZDOTDIR="$XDG_CONFIG_HOME"/zsh
 export ZSH_CUSTOM="$XDG_CONFIG_HOME"/oh-my-zsh
-export HISTFILE="$XDG_STATE_HOME"/zsh/history
+
+export HISTFILE="$XDG_STATE_HOME/zsh/history"
+
+export HISTSIZE=1000000000
+export SAVEHIST=$HISTSIZE
+setopt EXTENDED_HISTORY      # Save timestamp
+setopt INC_APPEND_HISTORY    # Write immediately, not at shell exit
+setopt SHARE_HISTORY         # Share between sessions
+setopt HIST_IGNORE_SPACE     # Don't save commands starting with space
+
 [ -d "$XDG_CACHE_HOME"/zsh ] || mkdir -p "$XDG_CACHE_HOME"/zsh
-zstyle ':completion:*' cache-path "$XDG_CACHE_HOME"/zsh/zcompcache
-# compinit -d "$XDG_CACHE_HOME"/zsh/zcompdump-$ZSH_VERSION
+zstyle ':completion:*' cache-path "$XDG_CACHE_HOME/zsh/zcompcache"
+
+# Log this shell to ~/log/zsh.log
+echo "`/opt/homebrew/bin/gdate +%s%3N` whoami=`whoami` tty=`tty` pid=$$ ppid=$PPID cmd=${0##*/} file=${${(%):-%N}//$HOME/~}" >> /Users/tm/log/zsh.log
+
+# ADDED BY TM
+################################################################################
+
+########################################################################################################################
+echo "\tX $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms >"
+# DO NOT ADD MORE LINES
+########################################################################################################################
 
