@@ -1,0 +1,181 @@
+#!/bin/zsh
+
+echo "=========================================="
+echo "CURSOR SHELL DIAGNOSTIC"
+echo "=========================================="
+echo ""
+echo "CONTEXT: Cursor AI agent can run commands in two different environments:"
+echo "  1. Agent's sandboxed non-interactive shell (extension-host parent)"
+echo "  2. User's actual terminal tab (terminal pty-host parent)"
+echo ""
+echo "When in the agent's sandbox, only .zshenv files load (not .zshrc)."
+echo "When in the terminal, full interactive config loads (.zprofile, .zshrc, etc)."
+echo "This affects which aliases, functions, and env vars are available."
+echo ""
+
+echo "=========================================="
+echo "SHELL CHARACTERISTICS"
+echo "=========================================="
+echo "PID:             $$"
+echo "PPID:            $PPID"
+echo "SHLVL:           $SHLVL"
+echo "CMD:             $0"
+echo "SHELL:           $SHELL"
+echo ""
+
+if [[ -o interactive ]]; then
+    echo "Interactive:     YES ✓"
+    echo "  → Full shell features available (tab completion, job control, etc)"
+else
+    echo "Interactive:     NO ✗"
+    echo "  → Running in non-interactive mode (limited features)"
+fi
+
+if [[ -o login ]]; then
+    echo "Login shell:     YES ✓"
+    echo "  → Loaded login scripts (.zprofile, .zlogin)"
+else
+    echo "Login shell:     NO ✗"
+    echo "  → Skipped login scripts"
+fi
+
+echo ""
+echo "stdin:           $([[ -t 0 ]] && echo 'TTY' || echo 'REDIRECTED/PIPE')"
+echo "stdout:          $([[ -t 1 ]] && echo 'TTY' || echo 'REDIRECTED/PIPE')"
+echo "stderr:          $([[ -t 2 ]] && echo 'TTY' || echo 'REDIRECTED/PIPE')"
+echo ""
+
+echo "=========================================="
+echo "PARENT PROCESS (How was this shell spawned?)"
+echo "=========================================="
+PARENT_CMD=$(ps -p $PPID -o comm= 2>/dev/null || echo "unknown")
+echo "Parent:          $PARENT_CMD"
+echo ""
+
+if echo "$PARENT_CMD" | grep -q "extension-host"; then
+    echo "ANALYSIS:        ✓ Cursor AI Agent's sandboxed shell"
+    echo "  → This is the agent's execution environment"
+    echo "  → Only .zshenv files loaded"
+    echo "  → Usually non-interactive and non-login"
+    echo "  → Commands here affect agent's available tools/env"
+elif echo "$PARENT_CMD" | grep -q "terminal pty-host"; then
+    echo "ANALYSIS:        ✓ User's actual terminal tab"
+    echo "  → This is YOUR terminal, not the agent's sandbox"
+    echo "  → Full shell config loaded (.zshrc, etc)"
+    echo "  → Interactive with all aliases/functions"
+    echo "  → History writes to user's HISTFILE"
+else
+    echo "ANALYSIS:        ? Unknown parent type"
+    echo "  → Not typical Cursor agent or terminal pattern"
+fi
+echo ""
+
+echo "=========================================="
+echo "PROCESS TREE"
+echo "=========================================="
+if command -v pstree >/dev/null 2>&1; then
+    pstree $PPID | head -10
+else
+    ps -p $PPID -o ppid= | xargs ps -p 2>/dev/null || echo "pstree not available"
+fi
+echo ""
+
+echo "=========================================="
+echo "SANDBOX DETECTION"
+echo "=========================================="
+if [[ -n "$CURSOR_SANDBOX" ]]; then
+    echo "CURSOR_SANDBOX:  $CURSOR_SANDBOX"
+    echo "  → Shell is running in sandboxed mode"
+else
+    echo "CURSOR_SANDBOX:  (not set)"
+    echo "  → May not be sandboxed, or different Cursor version"
+fi
+
+if [[ -n "$CURSOR_AGENT" ]]; then
+    echo "CURSOR_AGENT:    $CURSOR_AGENT"
+    echo "  → Running as Cursor AI agent"
+else
+    echo "CURSOR_AGENT:    (not set)"
+fi
+echo ""
+
+echo "=========================================="
+echo "HISTORY CONFIGURATION"
+echo "=========================================="
+echo "HISTFILE:        $HISTFILE"
+echo "HISTSIZE:        $HISTSIZE"
+echo "SAVEHIST:        $SAVEHIST"
+echo ""
+echo "Expected:        $XDG_STATE_HOME/zsh/history"
+echo "                 (/Users/tm/.local/state/zsh/history)"
+echo ""
+
+if [[ "$HISTFILE" == "$XDG_STATE_HOME/zsh/history" ]]; then
+    echo "STATUS:          ✓ Correct - using XDG state directory"
+elif [[ "$HISTFILE" == *"/.local/state/zsh/history" ]]; then
+    echo "STATUS:          ✓ Correct - using XDG state directory"
+else
+    echo "STATUS:          ✗ Wrong location!"
+    echo "  → Commands may not be saved to expected history file"
+    echo "  → Check if oh-my-zsh or other config is overriding HISTFILE"
+fi
+echo ""
+
+echo "=========================================="
+echo "CONFIG LOAD ORDER (Z_LOADED tracking)"
+echo "=========================================="
+if [[ -n "$Z_LOADED" ]]; then
+    echo "Z_LOADED:        $Z_LOADED files loaded"
+    echo ""
+    for i in {1..$Z_LOADED}; do
+        eval "file=\$Z_LOADED_$i"
+        [[ -n "$file" ]] && echo "  $i. $file"
+    done
+    echo ""
+    
+    # Check what types of files were loaded
+    if env | grep -q "Z_LOADED.*zshrc"; then
+        echo "ANALYSIS:        .zshrc files loaded → interactive shell"
+    else
+        echo "ANALYSIS:        No .zshrc files → non-interactive shell"
+    fi
+else
+    echo "Z_LOADED:        (not set - tracking not enabled)"
+fi
+echo ""
+
+echo "=========================================="
+echo "PATH CONFIGURATION"
+echo "=========================================="
+echo "Current PATH has $(echo $PATH | tr ':' '\n' | wc -l | tr -d ' ') entries"
+echo ""
+echo "Key directories:"
+[[ "$PATH" =~ "/opt/homebrew" ]] && echo "  ✓ Homebrew in PATH" || echo "  ✗ Homebrew NOT in PATH"
+[[ "$PATH" =~ ".local/bin" ]] && echo "  ✓ ~/.local/bin in PATH" || echo "  ✗ ~/.local/bin NOT in PATH"
+[[ "$PATH" =~ "rbenv" ]] && echo "  ✓ rbenv in PATH" || echo "  ✗ rbenv NOT in PATH"
+[[ "$PATH" =~ "pyenv" ]] && echo "  ✓ pyenv in PATH" || echo "  ✗ pyenv NOT in PATH"
+echo ""
+
+echo "=========================================="
+echo "SUMMARY"
+echo "=========================================="
+if [[ -o interactive ]] && echo "$PARENT_CMD" | grep -q "terminal pty-host"; then
+    echo "🔵 USER TERMINAL MODE"
+    echo "   You are running in the user's actual terminal tab."
+    echo "   Full interactive shell with all configs loaded."
+    echo ""
+elif ! [[ -o interactive ]] && echo "$PARENT_CMD" | grep -q "extension-host"; then
+    echo "🟢 AGENT SANDBOX MODE"
+    echo "   You are running in Cursor AI agent's sandboxed shell."
+    echo "   Non-interactive, only .zshenv configs loaded."
+    echo ""
+else
+    echo "🟡 MIXED/UNUSUAL MODE"
+    echo "   Shell characteristics don't match typical patterns."
+    echo "   Interactive: $([[ -o interactive ]] && echo YES || echo NO)"
+    echo "   Parent: $PARENT_CMD"
+    echo ""
+fi
+
+echo "=========================================="
+

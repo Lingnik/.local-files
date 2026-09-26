@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+
+import shutil
+import sys
+import colorsys
+
+# Get terminal dimensions
+cols, rows = shutil.get_terminal_size()
+
+# Hide cursor
+sys.stdout.write('\033[?25l')
+
+# Clear screen
+sys.stdout.write('\033[2J\033[H')
+
+mid_row = rows // 2
+
+for row in range(rows):
+    for col in range(cols):
+        # Hue varies across columns (0-1)
+        hue = col / cols
+        
+        if row <= mid_row:
+            # Top half: black to full color
+            saturation = 1.0
+            value = row / mid_row if mid_row > 0 else 1.0
+        else:
+            # Bottom half: full color to white
+            saturation = (rows - row) / (rows - mid_row)
+            value = 1.0
+        
+        # Convert HSV to RGB (colorsys returns 0-1 range)
+        r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+        
+        # Convert to 0-255 range
+        R = int(r * 255)
+        G = int(g * 255)
+        B = int(b * 255)
+        
+        # Print colored block using 24-bit color
+        sys.stdout.write(f'\033[48;2;{R};{G};{B}m ')
+    
+    # Reset color and newline
+    sys.stdout.write('\033[0m\n')
+
+# Show cursor again
+sys.stdout.write('\033[?25h')
+sys.stdout.flush()

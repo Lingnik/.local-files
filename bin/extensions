@@ -1,0 +1,116 @@
+#!/Users/tm/.pyenv/versions/token-counter/bin/python3
+
+"""
+File extension analyzer - shows stats by file extension
+Usage: extensions [directory] (defaults to current directory)
+"""
+
+import sys
+import os
+from pathlib import Path
+from collections import defaultdict
+import tiktoken
+
+def count_tokens(text, model="gpt-4"):
+    """Count tokens using tiktoken for the specified model"""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        return len(encoding.encode(text))
+    except KeyError:
+        # Fallback to cl100k_base encoding if model not found
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+
+def get_extension_stats(directory):
+    """Analyze file extensions in directory"""
+    stats = defaultdict(lambda: {'count': 0, 'size_bytes': 0, 'tokens': 0})
+    migration_stats = defaultdict(lambda: {'count': 0, 'size_bytes': 0, 'tokens': 0})
+    
+    for file_path in Path(directory).rglob('*'):
+        if file_path.is_file():
+            ext = file_path.suffix.lower()
+            if not ext:
+                ext = '(no extension)'
+            
+            # Check if this is a migration file or spec file
+            is_migration = 'migrate' in file_path.parts
+            is_spec = 'spec' in file_path.parts
+            
+            # Get file size
+            try:
+                size = file_path.stat().st_size
+            except OSError:
+                continue
+            
+            # Count tokens (only for text files)
+            tokens = 0
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    text = f.read()
+                tokens = count_tokens(text)
+            except (UnicodeDecodeError, PermissionError, OSError):
+                # Skip binary files or files we can't read
+                pass
+            
+            # Add to main stats
+            stats[ext]['count'] += 1
+            stats[ext]['size_bytes'] += size
+            stats[ext]['tokens'] += tokens
+            
+            # Track Ruby file sub-categories
+            if ext == '.rb':
+                if is_migration:
+                    migration_stats['migrations']['count'] += 1
+                    migration_stats['migrations']['size_bytes'] += size
+                    migration_stats['migrations']['tokens'] += tokens
+                elif is_spec:
+                    migration_stats['spec']['count'] += 1
+                    migration_stats['spec']['size_bytes'] += size
+                    migration_stats['spec']['tokens'] += tokens
+                else:
+                    migration_stats['code']['count'] += 1
+                    migration_stats['code']['size_bytes'] += size
+                    migration_stats['code']['tokens'] += tokens
+    
+    return stats, migration_stats
+
+def format_size(size_bytes):
+    """Convert bytes to KB"""
+    return round(size_bytes / 1024, 1)
+
+def main():
+    directory = sys.argv[1] if len(sys.argv) > 1 else '.'
+    
+    if not os.path.exists(directory):
+        print(f"Error: Directory '{directory}' not found", file=sys.stderr)
+        sys.exit(1)
+    
+    if not os.path.isdir(directory):
+        print(f"Error: '{directory}' is not a directory", file=sys.stderr)
+        sys.exit(1)
+    
+    stats, migration_stats = get_extension_stats(directory)
+    
+    # Print header
+    print(f"{'Extension':<15} {'Files':<8} {'Size(KB)':<10} {'Tokens':<10}")
+    print("-" * 50)
+    
+    # Sort by file count (descending)
+    for ext, data in sorted(stats.items(), key=lambda x: x[1]['count'], reverse=True):
+        size_kb = format_size(data['size_bytes'])
+        print(f"{ext:<15} {data['count']:<8} {size_kb:<10} {data['tokens']:<10}")
+        
+        # Add sub-entries for Ruby files if we have migration/spec data
+        if ext == '.rb' and (migration_stats['migrations']['count'] > 0 or migration_stats['spec']['count'] > 0 or migration_stats['code']['count'] > 0):
+            if migration_stats['migrations']['count'] > 0:
+                size_kb = format_size(migration_stats['migrations']['size_bytes'])
+                print(f"  migrations     {migration_stats['migrations']['count']:<8} {size_kb:<10} {migration_stats['migrations']['tokens']:<10}")
+            if migration_stats['spec']['count'] > 0:
+                size_kb = format_size(migration_stats['spec']['size_bytes'])
+                print(f"  spec           {migration_stats['spec']['count']:<8} {size_kb:<10} {migration_stats['spec']['tokens']:<10}")
+            if migration_stats['code']['count'] > 0:
+                size_kb = format_size(migration_stats['code']['size_bytes'])
+                print(f"  code           {migration_stats['code']['count']:<8} {size_kb:<10} {migration_stats['code']['tokens']:<10}")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# colour — print the 256-color palette and a truecolor sampling grid.
+# Usage:
+#   colour         # 256-palette on left, HSV grid on right (default)
+#   colour --hsv   # same as default
+#   colour --rgb   # 256-palette on left, 10x10x10 RGB cube on right
+# Reference codes as "colour<N>" in tmux (256) or "#RRGGBB" (truecolor).
+
+mode="hsv"
+case "${1:-}" in
+  --rgb) mode="rgb" ;;
+  --hsv|"") mode="hsv" ;;
+  -h|--help)
+    sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0 ;;
+  *) echo "Usage: colour [--rgb|--hsv]" >&2; exit 1 ;;
+esac
+
+# tput cols returns 80 when stdout isn't a tty (which it isn't inside $()).
+# stty size reads /dev/tty directly and works here.
+COLS=$(stty size </dev/tty 2>/dev/null | awk '{print $2}')
+[ -z "$COLS" ] && COLS=${COLUMNS:-$(tput cols 2>/dev/null)}
+[ -z "$COLS" ] && COLS=80
+LEFT_WIDTH=32                                    # widest left section
+GAP=2
+RIGHT_COL=$((LEFT_WIDTH + GAP + 1))              # 1-indexed terminal column
+RIGHT_WIDTH=$((COLS - LEFT_WIDTH - GAP))
+TC_CELL=8                                        # " #RRGGBB"
+TC_COLS=$((RIGHT_WIDTH / TC_CELL))
+[ "$TC_COLS" -lt 1 ] && TC_COLS=0                # terminal too narrow → no grid
+
+# --- 256-palette cells -----------------------------------------------------
+
+# 5-char cell (" NNN ") for cube + greyscale
+cell() {
+  local n=$1 fg=16
+  if [ "$n" -lt 16 ]; then
+    [ "$n" -lt 8 ] && fg=15
+    [ "$n" -eq 8 ] && fg=15
+  elif [ "$n" -ge 232 ]; then
+    [ "$n" -lt 244 ] && fg=15
+  else
+    local r=$(( (n - 16) / 36 ))
+    local g=$(( (n - 16) / 6 % 6 ))
+    local b=$(( (n - 16) % 6 ))
+    [ $((r + g + b)) -lt 6 ] && fg=15
+  fi
+  printf "\e[38;5;%d;48;5;%dm %3d \e[0m" "$fg" "$n" "$n"
+}
+
+# 4-char cell ("NNN ") for the 16-palette — one fewer char of left padding
+cell16() {
+  local n=$1 fg=16
+  [ "$n" -lt 8 ] && fg=15
+  [ "$n" -eq 8 ] && fg=15
+  printf "\e[38;5;%d;48;5;%dm%3d \e[0m" "$fg" "$n" "$n"
+}
+
+# --- Build left-side rows (51 total) ---------------------------------------
+
+declare -a L
+build_left() {
+  local i j r g b idx line row
+
+  L[1]="Standard 16 (0-15):"
+
+  line=""
+  for i in 0 1 2 3 4 5 6 7; do line+=$(cell16 "$i"); done
+  L[2]="$line"
+  line=""
+  for i in 8 9 10 11 12 13 14 15; do line+=$(cell16 "$i"); done
+  L[3]="$line"
+
+  L[4]=""
+  L[5]="Color cube 16-231 — 6x6x6 RGB:"
+
+  row=6
+  for r in 0 1 2 3 4 5; do
+    for g in 0 1 2 3 4 5; do
+      line=""
+      for b in 0 1 2 3 4 5; do
+        idx=$((16 + 36*r + 6*g + b))
+        line+=$(cell "$idx")
+      done
+      L[$row]="$line"
+      row=$((row+1))
+    done
+    if [ "$r" -lt 5 ]; then
+      L[$row]=""
+      row=$((row+1))
+    fi
+  done
+  # row == 47
+
+  L[47]="Greyscale 232-255:"
+  for i in 0 1 2 3; do
+    line=""
+    for j in 0 1 2 3 4 5; do
+      idx=$((232 + i*6 + j))
+      line+=$(cell "$idx")
+    done
+    L[$((48 + i))]="$line"
+  done
+}
+
+# --- Build right-side rows (51 total) --------------------------------------
+
+declare -a R
+build_right_hsv() {
+  R[1]="Truecolor HSV: ${TC_COLS} hues × 50 levels (V ramp, S ramp)"
+  local awk_out
+  awk_out=$(awk -v hues="$TC_COLS" '
+    BEGIN {
+      for (row = 0; row < 50; row++) {
+        if (row < 25) { v = (row + 1) / 25.0; s = 1.0 }
+        else          { v = 1.0;              s = (50 - row) / 25.0 }
+        line = ""
+        for (h = 0; h < hues; h++) {
+          hue = (h * 360) / hues
+          hh = hue / 60.0
+          ii = int(hh) % 6
+          f = hh - int(hh)
+          p = v * (1 - s); q = v * (1 - s * f); t = v * (1 - s * (1 - f))
+          if      (ii == 0) { rr=v; gg=t; bb=p }
+          else if (ii == 1) { rr=q; gg=v; bb=p }
+          else if (ii == 2) { rr=p; gg=v; bb=t }
+          else if (ii == 3) { rr=p; gg=q; bb=v }
+          else if (ii == 4) { rr=t; gg=p; bb=v }
+          else              { rr=v; gg=p; bb=q }
+          R = int(rr * 255 + 0.5); G = int(gg * 255 + 0.5); B = int(bb * 255 + 0.5)
+          # Monochrome low-contrast fg: a grey whose luminance gently tracks
+          # bg luminance. Smooth, unbiased (no hue tilt), barely visible.
+          # Compresses the [0,255] range into [25,230] so fg is never pure
+          # black/white and always slightly distinct from bg at the extremes.
+          bg_lum = (R * 299 + G * 587 + B * 114) / 1000
+          g = int(bg_lum * 0.8 + 25 + 0.5)
+          fR = g; fG = g; fB = g
+          line = line sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm #%02X%02X%02X\033[0m", fR,fG,fB, R,G,B, R,G,B)
+        }
+        print line
+      }
+    }
+  ')
+  local i=2
+  while IFS= read -r ln; do
+    R[$i]="$ln"
+    i=$((i+1))
+  done <<< "$awk_out"
+}
+
+build_right_rgb() {
+  # 10×10×10 cube = 1000 samples. Fit in TC_COLS × 50 rows.
+  # Scan order: r outer, g middle, b inner.
+  R[1]="Truecolor 10×10×10 RGB cube (1000 samples)"
+  local per_row=$TC_COLS
+  local awk_out
+  awk_out=$(awk -v per_row="$per_row" '
+    BEGIN {
+      total = 1000
+      line = ""; col = 0; out_row = 0
+      for (idx = 0; idx < total; idx++) {
+        r = int(idx / 100); g = int(idx / 10) % 10; b = idx % 10
+        R = int(r * 255 / 9 + 0.5); G = int(g * 255 / 9 + 0.5); B = int(b * 255 / 9 + 0.5)
+        lum = (R * 299 + G * 587 + B * 114) / 1000
+        if (lum < 128) { fR = 255; fG = 255; fB = 255 } else { fR = 0; fG = 0; fB = 0 }
+        line = line sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm #%02X%02X%02X\033[0m", fR,fG,fB, R,G,B, R,G,B)
+        col++
+        if (col >= per_row) { print line; line = ""; col = 0; out_row++; if (out_row >= 50) exit }
+      }
+      if (col > 0 && out_row < 50) print line
+    }
+  ')
+  local i=2
+  while IFS= read -r ln; do
+    R[$i]="$ln"
+    i=$((i+1))
+  done <<< "$awk_out"
+}
+
+build_left
+if [ "$TC_COLS" -ge 3 ]; then
+  if [ "$mode" = "hsv" ]; then build_right_hsv; else build_right_rgb; fi
+fi
+
+# --- Render side-by-side ---------------------------------------------------
+
+for i in $(seq 1 51); do
+  left="${L[$i]:-}"
+  right="${R[$i]:-}"
+  printf '%s' "$left"
+  if [ -n "$right" ]; then
+    printf '\e[%dG' "$RIGHT_COL"
+    printf '%s' "$right"
+  fi
+  printf '\n'
+done
+
+echo
+echo 'Usage: 256 codes as "colour<N>" in tmux; truecolor as "#RRGGBB" (needs RGB override).'

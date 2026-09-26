@@ -1,0 +1,105 @@
+#!/bin/bash
+
+# backup-zsh-history - Incremental backup of zsh history with timestamp-based tracking
+# Backs up zsh history every 10 minutes, tracking progress by timestamp to prevent data loss
+
+set -euo pipefail
+
+# Configuration
+HISTFILE="${HISTFILE:-$HOME/.local/state/zsh/history}"
+[[ -f "$HOME/.local/work/env" ]] && source "$HOME/.local/work/env"
+BACKUP_DIR="${ZSH_HISTORY_ARCHIVE:-$HOME/.local/state/zsh/history-archive}"
+LAST_BACKUP_FILE="$BACKUP_DIR/.last-backup"
+LOCK_FILE="/tmp/backup-zsh-history.lock"
+
+# Ensure backup directory exists
+mkdir -p "$BACKUP_DIR"
+
+# Acquire lock using PID file to prevent concurrent runs
+if [[ -f "$LOCK_FILE" ]]; then
+    existing_pid=$(cat "$LOCK_FILE" 2>/dev/null || true)
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+        echo "backup-zsh-history: another instance (PID $existing_pid) is running, exiting"
+        exit 0
+    fi
+fi
+echo $$ > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"' EXIT
+
+# Function to get last backed up timestamp
+get_last_backup_timestamp() {
+    if [[ -f "$LAST_BACKUP_FILE" ]]; then
+        cat "$LAST_BACKUP_FILE"
+    else
+        echo "0"
+    fi
+}
+
+# Function to save last backup timestamp
+save_last_backup_timestamp() {
+    echo "$1" > "$LAST_BACKUP_FILE"
+}
+
+# Function to create backup filename with timestamp
+get_backup_filename() {
+    local timestamp="$1"
+    local date_str
+    date_str=$(date -r "$timestamp" '+%Y-%m-%d-%H%M%S' 2>/dev/null || date '+%Y-%m-%d-%H%M%S')
+    echo "history-$date_str.gz"
+}
+
+# Main backup logic
+main() {
+    local start_seconds=$SECONDS
+    local start_time
+    start_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    # Check if history file exists
+    if [[ ! -f "$HISTFILE" ]]; then
+        echo "Error: History file not found: $HISTFILE" >&2
+        exit 1
+    fi
+
+    # Get last backed up timestamp
+    local last_backup_timestamp
+    last_backup_timestamp=$(get_last_backup_timestamp)
+
+    # Find the latest timestamp in the history file newer than last backup.
+    # Single awk pass replaces the previous per-line sed loop over all entries.
+    local latest_timestamp
+    latest_timestamp=$(LC_ALL=C awk -F: -v last="$last_backup_timestamp" '
+        /^: / { ts = $2+0; if (ts > last && ts > max) max = ts }
+        END { if (max) print max }
+    ' "$HISTFILE")
+
+    # If no new timestamps, exit early
+    if [[ -z "$latest_timestamp" ]]; then
+        echo "$(date +%s) noop"
+        printf "%s\t%d\tbackup-zsh-history\n" "$start_time" "$((SECONDS - start_seconds))" >> "$HOME/log/cron.log"
+        exit 0
+    fi
+
+    # Create backup filename
+    local backup_filename
+    backup_filename=$(get_backup_filename "$latest_timestamp")
+
+    # Extract new history entries and compress — single awk pass
+    LC_ALL=C awk -F: -v last="$last_backup_timestamp" '
+        /^: / { ts = $2+0; if (ts > last) print }
+    ' "$HISTFILE" | gzip -c > "$BACKUP_DIR/$backup_filename"
+
+    local new_entries_count
+    new_entries_count=$(LC_ALL=C awk -F: -v last="$last_backup_timestamp" '
+        /^: / { ts = $2+0; if (ts > last) count++ }
+        END { print count+0 }
+    ' "$HISTFILE")
+
+    # Update last backup timestamp
+    save_last_backup_timestamp "$latest_timestamp"
+
+    echo "$(date +%s) Backed up $new_entries_count lines of history (latest: $latest_timestamp) to $BACKUP_DIR/$backup_filename"
+    printf "%s\t%d\tbackup-zsh-history\n" "$start_time" "$((SECONDS - start_seconds))" >> "$HOME/log/cron.log"
+}
+
+# Run main function
+main "$@"

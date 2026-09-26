@@ -6,5 +6,30 @@
 .zsh_sessions*
 /pipx/
 .DS_Store
+__pycache__/
 /config/falcon/
 /config/Dadroit/
+
+# Work machine layer
+/work/
+
+# Secrets and auth state
+/.secrets
+/config/gh/hosts.yml
+/config/shortcut-cli/
+
+# Machine and runtime state
+/config/homebrew/
+/config/caddy/
+/token-counter-env/
+/profiles_show*
+
+# Tool-managed binaries and symlinks (installed by brew, uv, or vendor installers)
+/bin/aws-vault
+/bin/tg
+/bin/clickhousectl
+/bin/chctl
+/bin/claude
+/bin/cchat
+/bin/cursor-agent
+/bin/llmgw

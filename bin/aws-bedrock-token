@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Simple script to generate an AWS Bedrock bearer token and output it to stdout
+# Usage: bedrock-token
+
+require 'aws_bedrock_token_generator'
+
+begin
+  # Generate a bearer token using default settings
+  # This will use AWS_REGION environment variable and default credential chain
+  token = AwsBedrockTokenGenerator.provide_token
+  
+  # Output the token to stdout
+  puts token
+  
+rescue ArgumentError => e
+  STDERR.puts "Error: #{e.message}"
+  STDERR.puts "Make sure AWS_REGION environment variable is set or provide region explicitly"
+  exit 1
+rescue => e
+  STDERR.puts "Error generating token: #{e.message}"
+  STDERR.puts "Make sure AWS credentials are configured (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, etc.)"
+  exit 1
+end

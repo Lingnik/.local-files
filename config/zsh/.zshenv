@@ -1,9 +1,47 @@
 ########################################################################################################################
 echo "`/opt/homebrew/bin/gdate +%s%3N` whoami=`whoami` tty=`tty` pid=$$ ppid=$PPID cmd=${0##*/} file=${${(%):-%N}//$HOME/~}" >> /Users/tm/log/zsh.log
-echo -n "DEBUG> ${${(%):-%N}//$HOME/~} >" && timing_ns=$(/opt/homebrew/bin/gdate +%s%3N)
+if [[ -z "$CURSOR_AGENT" ]]; then
+echo -n "DEBUG: ${${(%):-%N}//$HOME/~} :" && timing_ns=$(/opt/homebrew/bin/gdate +%s%3N)
 echo -n "\t0 $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms" && timing_ns=$(/opt/homebrew/bin/gdate +%s%3N)
+fi
 export Z_LOADED=$((${Z_LOADED:-0} + 1)); export Z_LOADED_${Z_LOADED}=${(%):-%N}
 ########################################################################################################################
+
+# Cursor-specific debugging
+if [[ -n "$CURSOR_AGENT" ]] || [[ -n "$CURSOR_TRACE_ID" ]]; then
+  {
+    echo "=== CURSOR DEBUG START ==="
+    echo "Timestamp: $(/opt/homebrew/bin/gdate +%s%3N)"
+    echo "PID: $$"
+    echo "PPID: $PPID"
+    echo "File: ${${(%):-%N}//$HOME/~}"
+    echo "CURSOR_AGENT: ${CURSOR_AGENT:-unset}"
+    echo "CURSOR_TRACE_ID: ${CURSOR_TRACE_ID:-unset}"
+    echo "All CURSOR_* vars:"
+    env | grep -i cursor || echo "  (none found)"
+    echo "Shell: $SHELL"
+    echo "ZSH_VERSION: $ZSH_VERSION"
+    echo "Interactive: $([[ -o interactive ]] && echo yes || echo no)"
+    echo "Login: $([[ -o login ]] && echo yes || echo no)"
+    echo "TTY: $(tty 2>/dev/null || echo 'not a tty')"
+    echo "Parent process: $(ps -p $PPID -o comm= 2>/dev/null || echo 'unknown')"
+    echo "PWD: $PWD"
+    echo "=== CURSOR DEBUG END ==="
+  } >> /Users/tm/log/cursor-debug.log 2>&1
+  
+  # Trap errors to log them
+  function cursor_error_trap() {
+    {
+      echo "=== CURSOR ERROR TRAP ==="
+      echo "Timestamp: $(/opt/homebrew/bin/gdate +%s%3N)"
+      echo "Error code: $?"
+      echo "Line: $LINENO"
+      echo "Command: $ZSH_DEBUG_CMD"
+      echo "=== END ERROR ==="
+    } >> /Users/tm/log/cursor-debug.log 2>&1
+  }
+  trap cursor_error_trap ERR
+fi
 
 export Z_PID_${Z_LOADED}=$$
 export Z_PPID_${Z_LOADED}=$PPID
@@ -137,6 +175,10 @@ fi
 
 [[ -a $HOME/.secrets ]] && source $HOME/.secrets
 
+# Work machine layer (gitignored): scripts, variables, and shell functions
+[[ -d $HOME/.local/work/bin ]] && export PATH="$HOME/.local/work/bin:$PATH"
+[[ -f $HOME/.local/work/env ]] && source $HOME/.local/work/env
+
 
 # Only run omz when interactive else Cursor will break
 if [[ -o interactive ]]; then
@@ -151,6 +193,12 @@ alias gs='git status'
 # tmux
 if [[ -o interactive ]]; then
     bindkey -s ^s "tmux-sessionizer\n"
+
+    # Word-jump and line-jump with Opt/Cmd+Arrow (iTerm2 sends these escape sequences).
+    bindkey '^[[1;3D' backward-word        # Opt+Left
+    bindkey '^[[1;3C' forward-word         # Opt+Right
+    bindkey '^[[1;9D' beginning-of-line    # Cmd+Opt+Left  (iff iTerm2 mapping is set)
+    bindkey '^[[1;9C' end-of-line          # Cmd+Opt+Right (iff iTerm2 mapping is set)
 fi
 alias tls="tmux list-sessions"
 alias ta="tmux attach -t"
@@ -191,7 +239,7 @@ function vgrep() {
 
 # history grep
 function hgrep() {
-    zgrep -rh -- "$@" ~/git/a/tm-knowledge/zsh-history
+    zgrep -rh -- "$@" "${ZSH_HISTORY_ARCHIVE:-$HOME/.local/state/zsh/history-archive}"
 }
 alias hg='hgrep'
 
@@ -199,6 +247,8 @@ alias hg='hgrep'
 alias ls='ls -1'
 
 alias resource='source ~/.local/config/zsh/.zshrc'
+
+alias op='/Users/tm/.local/bin/op-alert.sh'
 
 function bedrock() {
     export AWS_BEARER_TOKEN_BEDROCK=`op run -- aws-bedrock-token`
@@ -211,9 +261,21 @@ function bedrock() {
     return $exit_code
 }
 
-source $HOME/.local/config/zsh/*_zshenv
+[[ -f $HOME/.local/work/zshenv ]] && source $HOME/.local/work/zshenv
 
 ########################################################################################################################
-echo "\tX $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms >"
+[[ -z "$CURSOR_AGENT" ]] && echo "\tX $((($(/opt/homebrew/bin/gdate +%s%3N) - timing_ns)))ms :"
+
+# Cursor-specific debugging at end of zshenv
+if [[ -n "$CURSOR_AGENT" ]] || [[ -n "$CURSOR_TRACE_ID" ]]; then
+  {
+    echo "=== CURSOR DEBUG END OF ZSHENV ==="
+    echo "Timestamp: $(/opt/homebrew/bin/gdate +%s%3N)"
+    echo "Z_LOADED: $Z_LOADED"
+    echo "PATH (first 5): $(echo $PATH | tr ':' '\n' | head -5 | tr '\n' ':')"
+    echo "=== END ==="
+  } >> /Users/tm/log/cursor-debug.log 2>&1
+fi
+
 # DO NOT ADD MORE LINES
 ########################################################################################################################

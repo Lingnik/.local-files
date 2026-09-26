@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# colour-truecolor — print a smooth 24-bit RGB gradient.
+# If the gradient is smooth (no banding), you have true color.
+# If it looks stair-stepped/posterized, you're being downsampled to 256.
+
+awk 'BEGIN{
+  s="  ";
+  for (col=0; col<77; col++) {
+    r = 255 - (col * 255 / 76);
+    g = (col * 510 / 76);
+    if (g > 255) g = 510 - g;
+    b = (col * 255 / 76);
+    printf "\033[48;2;%d;%d;%dm%s", r, g, b, s;
+  }
+  printf "\033[0m\n";
+}'

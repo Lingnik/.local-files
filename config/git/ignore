@@ -4,3 +4,5 @@
 __pycache__
 .ruby-gemset
 coverage
+
+**/.claude/settings.local.json

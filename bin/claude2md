@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""
+Convert Claude conversation JSON export to readable markdown format.
+
+This script takes a Claude conversation JSON file and converts it to a well-formatted
+markdown file that preserves all the original content while making it human-readable.
+
+Usage:
+    claude2md input.json [output.md]
+    
+If no output file is specified, it will use the input filename with .md extension.
+"""
+
+import json
+import sys
+import os
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+import argparse
+
+
+def format_timestamp(timestamp: str) -> str:
+    """Format ISO timestamp to readable format."""
+    if not timestamp:
+        return "Unknown time"
+    try:
+        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    except:
+        return timestamp
+
+
+def escape_markdown(text: str) -> str:
+    """Escape markdown special characters in text."""
+    if not text:
+        return ""
+    # Replace newline escape sequences with actual newlines
+    text = text.replace('\\n', '\n')
+    # Escape markdown special characters
+    text = text.replace('\\', '\\\\')
+    text = text.replace('*', '\\*')
+    text = text.replace('_', '\\_')
+    text = text.replace('`', '\\`')
+    text = text.replace('#', '\\#')
+    text = text.replace('[', '\\[')
+    text = text.replace(']', '\\]')
+    text = text.replace('(', '\\(')
+    text = text.replace(')', '\\)')
+    return text
+
+
+def format_text_content(content: str, indent: int = 0) -> str:
+    """Format text content with proper indentation and escaping."""
+    if not content:
+        return ""
+    
+    # Replace newline escape sequences with actual newlines
+    content = content.replace('\\n', '\n')
+    
+    # Split into lines and add proper indentation
+    lines = content.split('\n')
+    indented_lines = []
+    for line in lines:
+        if line.strip():  # Only indent non-empty lines
+            indented_lines.append('  ' * indent + line)
+        else:
+            indented_lines.append('')  # Preserve empty lines
+    
+    return '\n'.join(indented_lines)
+
+
+def format_content_block(content: Dict[str, Any], indent: int = 0) -> str:
+    """Format a single content block based on its type."""
+    content_type = content.get('type', 'unknown')
+    result = []
+    
+    # Add timestamp if available
+    if 'start_timestamp' in content and content['start_timestamp']:
+        timestamp = format_timestamp(content['start_timestamp'])
+        result.append(f"{'  ' * indent}**Timestamp:** {timestamp}")
+    
+    if content_type == 'text':
+        text = content.get('text', '')
+        if text:
+            formatted_text = format_text_content(text, indent)
+            result.append(f"{'  ' * indent}**Text:**")
+            result.append(formatted_text)
+    
+    elif content_type == 'thinking':
+        thinking = content.get('thinking', '')
+        if thinking:
+            formatted_thinking = format_text_content(thinking, indent)
+            result.append(f"{'  ' * indent}**Thinking:**")
+            result.append(formatted_thinking)
+        
+        # Add summaries if available
+        summaries = content.get('summaries', [])
+        if summaries:
+            result.append(f"{'  ' * indent}**Summaries:**")
+            for summary in summaries:
+                summary_text = summary.get('summary', '')
+                if summary_text:
+                    result.append(f"{'  ' * (indent + 1)}- {summary_text}")
+    
+    elif content_type == 'tool_use':
+        name = content.get('name', 'Unknown tool')
+        input_data = content.get('input', {})
+        message = content.get('message', '')
+        
+        result.append(f"{'  ' * indent}**Tool Use:** {name}")
+        if message:
+            result.append(f"{'  ' * indent}**Message:** {message}")
+        if input_data:
+            result.append(f"{'  ' * indent}**Input:**")
+            input_str = json.dumps(input_data, indent=2)
+            formatted_input = format_text_content(input_str, indent + 1)
+            result.append(formatted_input)
+    
+    elif content_type == 'tool_result':
+        name = content.get('name', 'Unknown tool')
+        result.append(f"{'  ' * indent}**Tool Result:** {name}")
+        
+        # Process tool result content
+        tool_content = content.get('content', [])
+        for item in tool_content:
+            if item.get('type') == 'knowledge':
+                title = item.get('title', 'No title')
+                url = item.get('url', '')
+                metadata = item.get('metadata', {})
+                
+                result.append(f"{'  ' * (indent + 1)}**Knowledge:** {title}")
+                if url:
+                    result.append(f"{'  ' * (indent + 1)}**URL:** {url}")
+                
+                # Add metadata
+                if metadata:
+                    result.append(f"{'  ' * (indent + 1)}**Metadata:**")
+                    for key, value in metadata.items():
+                        if isinstance(value, dict):
+                            result.append(f"{'  ' * (indent + 2)}**{key}:**")
+                            for subkey, subvalue in value.items():
+                                result.append(f"{'  ' * (indent + 3)}- {subkey}: {subvalue}")
+                        else:
+                            result.append(f"{'  ' * (indent + 2)}- {key}: {value}")
+                
+                # Add text content if available
+                text = item.get('text', '')
+                if text:
+                    result.append(f"{'  ' * (indent + 1)}**Content:**")
+                    formatted_text = format_text_content(text, indent + 2)
+                    result.append(formatted_text)
+    
+    return '\n'.join(result)
+
+
+def format_message(message: Dict[str, Any]) -> str:
+    """Format a single chat message."""
+    result = []
+    
+    # Message header
+    sender = message.get('sender', 'unknown')
+    created_at = format_timestamp(message.get('created_at', ''))
+    uuid = message.get('uuid', '')
+    
+    result.append(f"## {sender.title()} Message")
+    result.append(f"**UUID:** {uuid}")
+    result.append(f"**Created:** {created_at}")
+    result.append("")
+    
+    # Main text content
+    text = message.get('text', '')
+    if text:
+        result.append("### Main Content")
+        formatted_text = format_text_content(text)
+        result.append(formatted_text)
+        result.append("")
+    
+    # Process content blocks
+    content_blocks = message.get('content', [])
+    if content_blocks:
+        result.append("### Content Blocks")
+        for i, content in enumerate(content_blocks, 1):
+            result.append(f"#### Block {i}")
+            formatted_block = format_content_block(content)
+            result.append(formatted_block)
+            result.append("")
+    
+    # Attachments and files
+    attachments = message.get('attachments', [])
+    files = message.get('files', [])
+    
+    if attachments:
+        result.append("### Attachments")
+        for attachment in attachments:
+            result.append(f"- {attachment}")
+        result.append("")
+    
+    if files:
+        result.append("### Files")
+        for file in files:
+            result.append(f"- {file}")
+        result.append("")
+    
+    return '\n'.join(result)
+
+
+def convert_conversation(input_file: str, output_file: str) -> None:
+    """Convert Claude conversation JSON to markdown."""
+    try:
+        with open(input_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: File '{input_file}' not found.")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in '{input_file}': {e}")
+        sys.exit(1)
+    
+    # Start building markdown content
+    result = []
+    
+    # Header information
+    result.append("# Claude Conversation Export")
+    result.append("")
+    
+    # Conversation metadata
+    result.append("## Conversation Information")
+    result.append(f"**UUID:** {data.get('uuid', 'Unknown')}")
+    result.append(f"**Name:** {data.get('name', 'Untitled')}")
+    result.append(f"**Summary:** {data.get('summary', 'No summary')}")
+    result.append(f"**Created:** {format_timestamp(data.get('created_at', ''))}")
+    result.append(f"**Updated:** {format_timestamp(data.get('updated_at', ''))}")
+    
+    # Account information
+    account = data.get('account', {})
+    if account:
+        result.append(f"**Account UUID:** {account.get('uuid', 'Unknown')}")
+    
+    result.append("")
+    
+    # Messages
+    messages = data.get('chat_messages', [])
+    if messages:
+        result.append("## Messages")
+        result.append("")
+        
+        for i, message in enumerate(messages, 1):
+            result.append(f"---")
+            result.append(f"**Message {i} of {len(messages)}**")
+            result.append("")
+            formatted_message = format_message(message)
+            result.append(formatted_message)
+            result.append("")
+    
+    # Write output file
+    try:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(result))
+        print(f"Successfully converted '{input_file}' to '{output_file}'")
+    except Exception as e:
+        print(f"Error writing output file '{output_file}': {e}")
+        sys.exit(1)
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Convert Claude conversation JSON export to readable markdown format"
+    )
+    parser.add_argument('input_file', help='Input JSON file')
+    parser.add_argument('output_file', nargs='?', help='Output markdown file (optional)')
+    
+    args = parser.parse_args()
+    
+    # Determine output filename
+    if args.output_file:
+        output_file = args.output_file
+    else:
+        # Use input filename with .md extension
+        base_name = os.path.splitext(args.input_file)[0]
+        output_file = f"{base_name}.md"
+    
+    convert_conversation(args.input_file, output_file)
+
+
+if __name__ == "__main__":
+    main()

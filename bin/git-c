@@ -1,0 +1,14 @@
+#!/bin/bash
+# git-c: safe wrapper for git -C <path>
+# Usage: git-c <verb> <path> [args...]
+# Example: git-c status ~/git/repo/main --short
+
+if [ $# -lt 2 ]; then
+  echo "Usage: git-c <verb> <path> [args...]" >&2
+  exit 1
+fi
+
+verb="$1"
+path="$2"
+shift 2
+exec git -C "$path" "$verb" "$@"

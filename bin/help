@@ -1,0 +1,78 @@
+#!/bin/zsh -f
+# Dynamically list all custom commands, aliases, and functions
+
+CONFIG_FILES=(
+    "$HOME/.local/config/oh-my-zsh"/*.zsh(N)
+    "$HOME/.local/config/zsh/.zshenv"(N)
+    "$HOME/.local/work/zshenv"(N)
+)
+
+echo "=== Commands (~/.local/bin/, ~/.local/work/bin/) ==="
+for f in "$HOME/.local/bin/"*(N) "$HOME/.local/work/bin/"*(N); do
+    [[ -x "$f" && -f "$f" ]] || continue
+    # Opt-in tip: a "# tip: ..." line in the script's first 10 lines.
+    tip=$(grep -m1 -E '^#[[:space:]]*tip:' "$f" 2>/dev/null \
+        | sed -E 's/^#[[:space:]]*tip:[[:space:]]*//')
+    if [[ -n "$tip" ]]; then
+        echo "- ${f##*/} — ${tip}"
+    else
+        echo "- ${f##*/}"
+    fi
+done | sort
+
+echo ""
+echo "=== Aliases ==="
+[[ ${#CONFIG_FILES[@]} -gt 0 ]] && awk '
+    /^[[:space:]]*alias [a-zA-Z_][a-zA-Z0-9_-]*=/ {
+        sub(/^[[:space:]]*alias /, "")
+        sub(/=.*$/, "")
+        print "- " $0
+    }
+' "${CONFIG_FILES[@]}" | sort -u
+
+echo ""
+echo "=== Functions ==="
+[[ ${#CONFIG_FILES[@]} -gt 0 ]] && awk '
+    FNR == 1 { n = 0 }
+    /^[[:space:]]*$/ { n = 0; next }
+    /^[[:space:]]*#/ {
+        line = $0
+        sub(/^[[:space:]]*#[[:space:]]?/, "", line)
+        comments[++n] = line
+        next
+    }
+    /^[[:space:]]*(function[[:space:]]+)?[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\(\)/ {
+        decl = $0
+        sub(/^[[:space:]]*function[[:space:]]+/, "", decl)
+        sub(/^[[:space:]]+/, "", decl)
+        sub(/[[:space:]]*\(\).*$/, "", decl)
+        name = decl
+
+        best = ""
+        # 1: "Usage: <name> ..."
+        for (i = 1; i <= n && best == ""; i++) {
+            if (match(comments[i], "^[Uu]sage:[[:space:]]*" name "([[:space:]]|$)")) {
+                best = comments[i]
+                sub(/^[Uu]sage:[[:space:]]*/, "", best)
+            }
+        }
+        # 2: "... (usage: <name> ...)"
+        for (i = 1; i <= n && best == ""; i++) {
+            if (match(comments[i], "\\([Uu]sage:[[:space:]]*" name)) {
+                s = comments[i]
+                sub(/^.*\([Uu]sage:[[:space:]]*/, "", s)
+                sub(/\).*$/, "", s)
+                best = s
+            }
+        }
+        # 3: first non-empty comment line as description
+        for (i = 1; i <= n && best == ""; i++) {
+            if (comments[i] != "") best = name " — " comments[i]
+        }
+
+        print "- " (best == "" ? name : best)
+        n = 0
+        next
+    }
+    /./ { n = 0 }
+' "${CONFIG_FILES[@]}" | sort -u

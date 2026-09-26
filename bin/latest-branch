@@ -1,0 +1,114 @@
+#!/bin/bash
+# Find the most recent branch in a worktree
+# Usage: latest-branch [repo_path]
+# If no repo_path is provided, uses current directory
+
+REPO_PATH="${1:-$(pwd)}"
+
+# Change to the repository directory if provided
+if [[ -n "$1" ]]; then
+    if [[ ! -d "$REPO_PATH" ]]; then
+        echo "Error: Repository path '$REPO_PATH' not found" >&2
+        exit 1
+    fi
+    cd "$REPO_PATH"
+fi
+
+# Determine if we're in a worktree or at repo root
+if [[ -f .git ]]; then
+    # We're in a worktree, go up one level to find the branch dirs
+    repo_root="$(dirname "$(pwd)")"
+elif [[ -d .git ]]; then
+    # We're at the repo root, stay here
+    repo_root="$(pwd)"
+else
+    echo "Error: Not in a git repository" >&2
+    exit 1
+fi
+
+# Find all branch directories (exclude .git and any hidden files)
+branches=()
+# Use ls to get directory names, then check each one
+for branch_name in $(ls -1 "$repo_root" 2>/dev/null); do
+    dir_path="$repo_root/$branch_name"
+    if [[ -d "$dir_path" && "$branch_name" != ".git" && ! "$branch_name" =~ ^\..* ]]; then
+        branches+=("$branch_name")
+    fi
+done
+
+# Debug output (only if DEBUG is set)
+if [[ -n "$DEBUG" ]]; then
+    echo "DEBUG: repo_root=$repo_root" >&2
+    echo "DEBUG: ls output: $(ls -1 "$repo_root" 2>/dev/null)" >&2
+    echo "DEBUG: branches found: ${branches[@]}" >&2
+fi
+
+if [[ ${#branches[@]} -eq 0 ]]; then
+    echo "No branches found" >&2
+    exit 1
+fi
+
+# Find the most recent branch by checking the latest timestamp for each branch:
+# 1. Uncommitted changes (highest priority)
+# 2. Git commit times
+# 3. File modification times (fallback)
+latest_branch=""
+latest_time=0
+
+for branch in "${branches[@]}"; do
+    branch_path="$repo_root/$branch"
+    branch_time=0
+    
+    # Change to the branch directory to check git status
+    if [[ -d "$branch_path" ]]; then
+        cd "$branch_path"
+        
+        # Check for uncommitted changes first (highest priority)
+        if git status --porcelain 2>/dev/null | grep -q .; then
+            # There are uncommitted changes, get the most recent modification time
+            # of the changed files using git ls-files
+            uncommitted_time=$(git ls-files -m -o --exclude-standard 2>/dev/null | while read file; do
+                if [[ -f "$file" ]]; then
+                    stat -f "%m" "$file" 2>/dev/null
+                fi
+            done | sort -n | tail -1 2>/dev/null || echo "0")
+            
+            if [[ $uncommitted_time -gt $branch_time ]]; then
+                branch_time=$uncommitted_time
+            fi
+        fi
+        
+        # If no uncommitted changes, check git commit time
+        if [[ $branch_time -eq 0 ]]; then
+            if git show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+                git_time=$(git log -1 --format="%ct" "$branch" 2>/dev/null || echo "0")
+                if [[ $git_time -gt $branch_time ]]; then
+                    branch_time=$git_time
+                fi
+            fi
+        fi
+        
+        # Fallback: check most recent file modification time
+        if [[ $branch_time -eq 0 ]]; then
+            recent_file_time=$(find . -type f -not -path "*/.*" -not -path "*/node_modules/*" -not -path "*/target/*" -not -path "*/build/*" -exec stat -f "%m" {} \; 2>/dev/null | sort -n | tail -1 2>/dev/null || echo "0")
+            if [[ $recent_file_time -gt $branch_time ]]; then
+                branch_time=$recent_file_time
+            fi
+        fi
+        
+        # Return to repo root
+        cd "$repo_root"
+    fi
+    
+    if [[ $branch_time -gt $latest_time ]]; then
+        latest_time=$branch_time
+        latest_branch="$branch"
+    fi
+done
+
+if [[ -n "$latest_branch" ]]; then
+    echo "$latest_branch"
+else
+    echo "Could not determine latest branch" >&2
+    exit 1
+fi

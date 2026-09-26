@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Print an account-by-AZ-ID table showing which letter (a/b/c/...) each
+account assigns to each physical Availability Zone.
+
+Reads ~/.aws/config, groups profiles by sso_account_id, picks a readonly
+role per account, and runs `aws-vault exec <profile> -- aws ec2
+describe-availability-zones` in parallel.
+"""
+
+import argparse
+import concurrent.futures
+import configparser
+import json
+import os
+import subprocess
+import sys
+from collections import defaultdict
+
+# Comma-separated SSO role names to try, in priority order.
+READONLY_ROLE_PRIORITY = [
+    r.strip()
+    for r in os.environ.get("AWS_AZ_MAP_ROLES", "ViewOnlyAccess,ReadOnlyAccess").split(",")
+    if r.strip()
+]
+
+
+def parse_aws_config(path):
+    cfg = configparser.ConfigParser()
+    cfg.read(path)
+    accounts = defaultdict(dict)
+    for section in cfg.sections():
+        if not section.startswith("profile "):
+            continue
+        profile = section[len("profile "):]
+        if profile.endswith("-sso"):
+            continue
+        sso_section = f"profile {profile}-sso"
+        if sso_section not in cfg:
+            continue
+        sso_cfg = cfg[sso_section]
+        account_id = sso_cfg.get("sso_account_id")
+        role_name = sso_cfg.get("sso_role_name")
+        if not account_id or not role_name:
+            continue
+        accounts[account_id][role_name] = profile
+    return accounts
+
+
+def pick_readonly_profile(roles):
+    for role in READONLY_ROLE_PRIORITY:
+        if role in roles:
+            return roles[role], role
+    return None, None
+
+
+def warmup(profile, timeout):
+    """Pre-populate aws-vault's credential cache so the parallel phase
+    doesn't deadlock on biometrics / keychain access."""
+    cmd = [
+        "aws-vault", "exec", profile, "--",
+        "aws", "sts", "get-caller-identity", "--output", "json",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"timeout after {timeout}s"
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout).strip()
+        return False, err.splitlines()[-1] if err else f"exit {result.returncode}"
+    return True, None
+
+
+def fetch_azs(profile, region, timeout):
+    cmd = [
+        "aws-vault", "exec", profile, "--",
+        "aws", "ec2", "describe-availability-zones",
+        "--region", region,
+        "--filters", "Name=zone-type,Values=availability-zone",
+        "--output", "json",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"timeout after {timeout}s"
+    if result.returncode != 0:
+        return None, (result.stderr or result.stdout).strip().splitlines()[-1] if (result.stderr or result.stdout).strip() else f"exit {result.returncode}"
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        return None, f"json decode: {e}"
+    mapping = {}
+    for az in data.get("AvailabilityZones", []):
+        zone_id = az.get("ZoneId")
+        zone_name = az.get("ZoneName", "")
+        if not zone_id or not zone_name.startswith(region):
+            continue
+        letter = zone_name[len(region):]
+        mapping[zone_id] = letter
+    return mapping, None
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--region", "-r", default="us-east-1",
+                   help="AWS region (default: us-east-1)")
+    p.add_argument("--config", default=os.path.expanduser("~/.aws/config"),
+                   help="path to AWS config (default: ~/.aws/config)")
+    p.add_argument("--workers", "-w", type=int, default=6,
+                   help="parallel aws-vault calls (default: 6)")
+    p.add_argument("--timeout", type=int, default=60,
+                   help="per-call timeout seconds (default: 60)")
+    p.add_argument("--include-account", action="append", default=[],
+                   help="limit to these account IDs (repeatable)")
+    p.add_argument("--exclude-account", action="append", default=[],
+                   help="skip these account IDs (repeatable)")
+    p.add_argument("--no-warmup", action="store_true",
+                   help="skip the serial sts:GetCallerIdentity warmup phase")
+    args = p.parse_args()
+
+    accounts = parse_aws_config(args.config)
+    if not accounts:
+        sys.exit(f"no accounts found in {args.config}")
+
+    work = []
+    skipped_no_role = []
+    for account_id, roles in sorted(accounts.items()):
+        if args.include_account and account_id not in args.include_account:
+            continue
+        if account_id in args.exclude_account:
+            continue
+        profile, role = pick_readonly_profile(roles)
+        if profile is None:
+            skipped_no_role.append((account_id, sorted(roles.keys())))
+            continue
+        work.append((account_id, profile, role))
+
+    if not work:
+        sys.exit("no accounts with a readonly role to query")
+
+    print(f"# region={args.region}  accounts={len(work)}  workers={args.workers}",
+          file=sys.stderr)
+
+    results = {}
+    errors = {}
+
+    if not args.no_warmup:
+        print(f"# warming up credentials for {len(work)} profiles (serial)...",
+              file=sys.stderr)
+        warmed = []
+        for i, (account_id, profile, role) in enumerate(work, 1):
+            ok, err = warmup(profile, args.timeout)
+            if ok:
+                print(f"  [{i}/{len(work)}] {account_id} {profile}: warmed",
+                      file=sys.stderr)
+                warmed.append((account_id, profile, role))
+            else:
+                short = err.replace("\n", " ")[:200]
+                print(f"  [{i}/{len(work)}] {account_id} {profile}: WARMUP FAILED — {short}",
+                      file=sys.stderr)
+                errors[account_id] = (profile, f"warmup: {err}")
+        work = warmed
+        if not work:
+            sys.exit("\nno profiles survived warmup")
+        print(f"# running describe-availability-zones for {len(work)} profiles (parallel)...",
+              file=sys.stderr)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futs = {
+            pool.submit(fetch_azs, profile, args.region, args.timeout):
+                (account_id, profile, role)
+            for account_id, profile, role in work
+        }
+        done = 0
+        total = len(futs)
+        for fut in concurrent.futures.as_completed(futs):
+            account_id, profile, role = futs[fut]
+            done += 1
+            try:
+                mapping, err = fut.result()
+            except Exception as e:
+                errors[account_id] = (profile, str(e))
+                print(f"  [{done}/{total}] {account_id} {profile}: ERROR {e}",
+                      file=sys.stderr)
+                continue
+            if err:
+                errors[account_id] = (profile, err)
+                print(f"  [{done}/{total}] {account_id} {profile}: ERROR {err}",
+                      file=sys.stderr)
+            else:
+                results[account_id] = (profile, role, mapping)
+                print(f"  [{done}/{total}] {account_id} {profile}: ok ({len(mapping)} AZs)",
+                      file=sys.stderr)
+
+    if not results:
+        sys.exit("\nno results — all queries failed")
+
+    all_zone_ids = sorted({zid for _, _, m in results.values() for zid in m.keys()})
+
+    header = ["account_id", "profile"] + all_zone_ids
+    rows = [header]
+    for account_id in sorted(results.keys()):
+        profile, role, mapping = results[account_id]
+        row = [account_id, profile]
+        for zid in all_zone_ids:
+            row.append(mapping.get(zid, "-"))
+        rows.append(row)
+
+    widths = [max(len(str(r[i])) for r in rows) for i in range(len(header))]
+
+    print()
+    for i, r in enumerate(rows):
+        line = "  ".join(str(c).ljust(widths[j]) for j, c in enumerate(r))
+        print(line)
+        if i == 0:
+            print("  ".join("-" * w for w in widths))
+
+    if skipped_no_role:
+        print("\n# skipped (no readonly role):", file=sys.stderr)
+        for account_id, roles in skipped_no_role:
+            print(f"  {account_id}: roles={roles}", file=sys.stderr)
+
+    if errors:
+        print("\n# errors:", file=sys.stderr)
+        for account_id, (profile, err) in sorted(errors.items()):
+            short = err.replace("\n", " ")[:200]
+            print(f"  {account_id} ({profile}): {short}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
